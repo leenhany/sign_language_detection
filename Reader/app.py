@@ -22,7 +22,8 @@ TRAINED_MOVEMENT_MODEL_PATH = 'Trainer/model/m_model.tflite'
 STATIC_MODEL_PATH = shutil.copy2(TRAINED_STATIC_MODEL_PATH, READER_MODEL_DIR)
 MOVEMENT_MODEL_PATH = shutil.copy2(TRAINED_MOVEMENT_MODEL_PATH, READER_MODEL_DIR)
 
-DETECTION_THRESHOLD = 0.5
+DETECTION_THRESHOLD = 0.8
+MOVEMENT_THRESHOLD = 0.95
 OUTPUT_COUNT = 5
 
 SEQUENCE_FRAME_NUM = 21
@@ -103,7 +104,6 @@ def main():
 	# 		row[0] for row in movement_classifier_labels
 	# ]
 		
-	counter = 0
 	while True:
 
 		# Process Key (ESC: end) 
@@ -174,11 +174,10 @@ def main():
 					
 					additional_display_height += 40
 
-					display_prob = "{:.2f}%".format(N_detected_elements[1] * 100)
-
 					# Prob > threshold*100% display
-					threshold = DETECTION_THRESHOLD
+					threshold = DETECTION_THRESHOLD if display_list == static_tuple_list else MOVEMENT_THRESHOLD
 					if N_detected_elements[1] > threshold:
+						display_prob = "{:.2f}%".format(N_detected_elements[1] * 100)
 						cv.putText(debug_image, str(classifier_labels[N_detected_elements[0]]) + " : " + str(display_prob), 
 							   (20 + additional_display_width, 40 + additional_display_height), cv.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3, cv.LINE_AA)
 
@@ -284,21 +283,27 @@ def pre_process_hand_movement(image, m_sequence):
 	
 	landmarks_seq = [] #(SEQ, 21*2)
 	
+	# Save first corrdinates for replacing start sequence landmarks position
+	first_seq_landmarks = copy.deepcopy(copy_of_m_sequence[0])
+	# print(first_seq_landmarks)
 
 	for seq in range(0, SEQUENCE_FRAME_NUM):
 		landmarks_seq.append(list(np.array(copy_of_m_sequence[seq]).flatten()))
 
 	# Convert to relative coordinates
-	first_seq_landmarks = copy.deepcopy(landmarks_seq[0])
-
+	first_seq_landmarks_flatten = copy.deepcopy(landmarks_seq[0])
+	
 	for seq in range(0, SEQUENCE_FRAME_NUM):
 		for landmark in range(0, (21*2)):
 			if ((landmark % 2) == 0):
-				landmarks_seq[seq][landmark] = (landmarks_seq[seq][landmark] - first_seq_landmarks[landmark]) / width
+				landmarks_seq[seq][landmark] = (landmarks_seq[seq][landmark] - first_seq_landmarks_flatten[landmark]) / width
 			else:
-				landmarks_seq[seq][landmark] = (landmarks_seq[seq][landmark] - first_seq_landmarks[landmark]) / height
+				landmarks_seq[seq][landmark] = (landmarks_seq[seq][landmark] - first_seq_landmarks_flatten[landmark]) / height
 
-	#print(np.shape(landmarks_seq))
+	
+	if(first_seq_landmarks[0][0] != 0 and first_seq_landmarks[0][1] != 0):
+		landmarks_seq[0] = pre_process_landmark(first_seq_landmarks)
+	
 	# Convert to a one-dimensional list #(SEQ*21*2,)
 	landmarks_seq = list(itertools.chain.from_iterable(landmarks_seq))
 

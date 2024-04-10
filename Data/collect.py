@@ -122,20 +122,28 @@ def pre_process_hand_movement(image, m_sequence):
 	
 	landmarks_seq = [] #(SEQ, 21*2)
 	
+	# Save first corrdinates for replacing start sequence landmarks position
+	first_seq_landmarks = copy.deepcopy(copy_of_m_sequence[0])
+	# print(first_seq_landmarks)
 
 	for seq in range(0, SEQUENCE_FRAME_NUM):
 		landmarks_seq.append(list(np.array(copy_of_m_sequence[seq]).flatten()))
 
 	# Convert to relative coordinates
-	first_seq_landmarks = copy.deepcopy(landmarks_seq[0])
-
+	first_seq_landmarks_flatten = copy.deepcopy(landmarks_seq[0])
+	
 	for seq in range(0, SEQUENCE_FRAME_NUM):
 		for landmark in range(0, (21*2)):
 			if ((landmark % 2) == 0):
-				landmarks_seq[seq][landmark] = (landmarks_seq[seq][landmark] - first_seq_landmarks[landmark]) / width
+				landmarks_seq[seq][landmark] = (landmarks_seq[seq][landmark] - first_seq_landmarks_flatten[landmark]) / width
 			else:
-				landmarks_seq[seq][landmark] = (landmarks_seq[seq][landmark] - first_seq_landmarks[landmark]) / height
+				landmarks_seq[seq][landmark] = (landmarks_seq[seq][landmark] - first_seq_landmarks_flatten[landmark]) / height
 
+	
+	if(first_seq_landmarks[0][0] != 0 and first_seq_landmarks[0][1] != 0):
+		landmarks_seq[0] = pre_process_landmark(first_seq_landmarks)
+		print("first is converted")
+	
 	print(np.shape(landmarks_seq))
 	# Convert to a one-dimensional list #(SEQ*21*2,)
 	landmarks_seq = list(itertools.chain.from_iterable(landmarks_seq))
@@ -348,7 +356,7 @@ def main():
 				if(mode == 1):
 					
 					# Not J and Z
-					if(current_index != 9 and current_index != 25 and current_index < 26):
+					if(current_index != 9 and current_index != 25 and current_index != 26):
 
 						# Clear movement lists
 						LANDMARK_MOVEMENT_SEQUENCE.clear()
@@ -382,7 +390,7 @@ def main():
 							record_movement(debug_image, HAND_MOVEMENT_SEQUENCE, MOVEMENT_CSV_PATH, current_index, LANDMARK_MOVEMENT_SEQUENCE)
 					
 					# NONE with m_label_index 0
-					elif(current_index >= 26):
+					elif(current_index == 26):
 						
 						# Track custom index landmark
 						LANDMARK_MOVEMENT_SEQUENCE.append(landmark_list[track_landmark_movement_index])

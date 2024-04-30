@@ -99,4 +99,4 @@ Static sign model file, replacable.
 
 
 # License
-* Collector, Reader, Trainer is under [Apache v2 license](LICENSE)
+* ASL Sign Language Detector is under [Apache v2 license](LICENSE)

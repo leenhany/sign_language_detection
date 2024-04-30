@@ -1,18 +1,56 @@
-# Install
-* Python 3.11 (MediaPipe not supported Python 3.12)
+# ASL Sign Language Detector
+
+This is a brief documentation about the sign language detector tech for the game - [Gesture Quest]().  
+
+[Gesture Quest]() is an educational game designed to educate individuals on ASL (American Sign Language). 
+
+## Install
+* Python 3.11
 * pip install opencv-python
 * pip install mediapipe
 * pip install numpy
 * pip install tensorflow
 
-# Directory
+## Directory
+  
+This repo contains three modules:  
+* Collector: This is the data collector module for extracting data from hand landmarks provided by [Google MediaPipe](https://developers.google.com/mediapipe). 
+* Reader: This is the simple app reader module to showcase the trained ML model prediction from the video/webcam live stream.
+* Trainer: This is the classifier model training notebook to train both static signs and movement signs.
+
 <pre>
-├─model
-│  │  classifier.py
-│  │  label.csv
-│  │  m_model.tflite
-│  └─ model.tflite
-└─ app.py
+├─ Collector
+│   |
+│   ├─  collect.py
+│   ├─  data.csv
+│   ├─  label.csv
+│   └─  m_data.csv
+|
+├─ Reader
+│   |
+|   ├─  model
+│   │    |
+│   │    ├─  classifier.py
+│   |    ├─  label.csv
+│   │    ├─  m_model.tflite
+│   |    └─  model.tflite
+│   |
+|   └─  app.py
+|
+└─ Trainer
+    |
+    ├─  model
+    │    |
+    │    ├─  data
+    │    |    |
+    │    |    ├─  data.csv
+    |    |    ├─  label.csv
+    |    |    └─  m_data.csv
+    |    |
+    |    └─   ## trained models
+    |
+    ├─  m_model_trainer.ipynb
+    └─  model_trainer.ipynb
 </pre>
 
 ### app.py
@@ -61,4 +99,4 @@ Static sign model file, replacable.
 
 
 # License
-* Hand_Recognition_ASL_Alphabets_Tracker_System is under [Apache v2 license](LICENSE)
+* Collector, Reader, Trainer is under [Apache v2 license](LICENSE)

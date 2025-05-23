@@ -1,8 +1,8 @@
 # ASL Sign Language Detector
 
-This is a brief documentation about the sign language detector tech for the game - [Gesture Quest]().  
+This is a brief documentation about the sign language detector tech for the game - [Gesture Quest](https://questure.itch.io/gesture-quest).  
 
-[Gesture Quest]() is an educational game designed to educate individuals on ASL (American Sign Language). 
+[Gesture Quest](https://questure.itch.io/gesture-quest) is an educational game designed to educate individuals on ASL (American Sign Language). 
 
 ## Install
 * Python 3.11

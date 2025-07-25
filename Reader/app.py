@@ -1,301 +1,244 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import csv
 import copy
 import shutil
 import argparse
 import itertools
 import numpy as np
-from collections import deque
-from collections import Counter
-
+import time
 import cv2 as cv
 import mediapipe as mp
 
+
+# Import your Classifier class
 from model.classifier import Classifier
 
-MAX_NUM_HANDS = 1
+# --- Constants ---
+MAX_NUM_HANDS = 1 
 LABEL_PATH = 'Reader/model/label.csv'
 READER_MODEL_DIR = 'Reader/model'
 STATIC_MODEL_PATH = 'Reader/model/model.tflite'
-MOVEMENT_MODEL_PATH = 'Reader/model/m_model.tflite'
 TRAINER_STATIC_MODEL_PATH = 'Trainer/model/model.tflite'
-TRAINER_MOVEMENT_MODEL_PATH = 'Trainer/model/m_model.tflite'
-
 
 DETECTION_THRESHOLD = 0.1
-OUTPUT_COUNT = 5
+OUTPUT_COUNT = 1
 
-SEQUENCE_FRAME_NUM = 21
-MOVEMENT_HISTORY = deque([[[0] * 2] * 21] * 21, maxlen=SEQUENCE_FRAME_NUM)
-MOVEMENT_DICT = dict([(0, -1), (1, 9), (2, 25)])
+# --- Global variables for sign holding and display bar ---
+last_detected_sign = ""
+time_last_sign_changed = 0.0
+confirmed_sign_text = ""
+display_bar_text = ""
+CONFIRMATION_HOLD_TIME = 1.1
 
-# TODO: MOVEMENT SIGN EXPANSION
-# MOVEMENT_LABEL_PATH = 'Reader/model/m_label.csv'
+# --- Constants for Bottom Text Bar ---
+TEXT_BAR_MIN_HEIGHT = 50
+TEXT_BAR_X_PADDING = 15
+TEXT_BAR_Y_PADDING_TOP = 35
+TEXT_BAR_LINE_HEIGHT = 40
+FONT = cv.FONT_HERSHEY_SIMPLEX
+FONT_SCALE = 1
+FONT_COLOR = (255, 255, 255)
+FONT_THICKNESS = 2
+BAR_BACKGROUND_COLOR = (0, 0, 0)
 
 def get_args():
-	parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--device", type=int, default=0)
+    parser.add_argument("--width", type=int, default=1280)  # Increased width
+    parser.add_argument("--height", type=int, default=720)   # Increased height
+    parser.add_argument('--use_static_image_mode', action='store_true')
+    parser.add_argument("--min_detection_confidence", type=float, default=0.7)
+    parser.add_argument("--min_tracking_confidence", type=float, default=0.5)
+    return parser.parse_args()
 
-	parser.add_argument("--device", type=int, default=0)
-	parser.add_argument("--width", help='cap width', type=int, default=960)
-	parser.add_argument("--height", help='cap height', type=int, default=540)
 
-	parser.add_argument('--use_static_image_mode', action='store_true')
-	parser.add_argument("--min_detection_confidence", help='min_detection_confidence', type=float, default=0.7)
-	parser.add_argument("--min_tracking_confidence", help='min_tracking_confidence', type=int, default=0.5)
 
-	args = parser.parse_args()
-
-	return args
-
-# Display hand rectangle
 def calc_bounding_rect(image, landmarks):
-	image_width, image_height = image.shape[1], image.shape[0]
-
-	landmark_array = np.empty((0, 2), int)
-
-	for _, landmark in enumerate(landmarks.landmark):
-		landmark_x = min(int(landmark.x * image_width), image_width - 1)
-		landmark_y = min(int(landmark.y * image_height), image_height - 1)
-
-		landmark_point = [np.array((landmark_x, landmark_y))]
-
-		landmark_array = np.append(landmark_array, landmark_point, axis=0)
-
-	x, y, w, h = cv.boundingRect(landmark_array)
-
-	return [x, y, x + w, y + h]
+    image_width, image_height = image.shape[1], image.shape[0]
+    landmark_array = np.array([[int(landmark.x * image_width), int(landmark.y * image_height)] for landmark in landmarks.landmark])
+    x, y, w, h = cv.boundingRect(landmark_array)
+    return [x, y, x + w, y + h]
 
 def draw_bounding_rect(image, brect):
-	
-	# Outer rectangle
-	cv.rectangle(image, (brect[0], brect[1]), (brect[2], brect[3]), (0, 0, 255), 1)
+    cv.rectangle(image, (brect[0], brect[1]), (brect[2], brect[3]), (0, 0, 255), 1)
+    return image
 
-	return image
-
-# Calculate landmark in-frame position
 def calc_landmark_list(image, landmarks):
-	image_width, image_height = image.shape[1], image.shape[0]
+    return [[int(landmark.x * image.shape[1]), int(landmark.y * image.shape[0])] for landmark in landmarks.landmark]
 
-	landmark_point = []
-	landmark_point_3D = []
-
-	# Keypoints
-	for _, landmark in enumerate(landmarks.landmark):
-		landmark_x = min(int(landmark.x * image_width), image_width - 1)
-		landmark_y = min(int(landmark.y * image_height), image_height - 1)
-		landmark_z = landmark.z
-
-		landmark_point.append([landmark_x, landmark_y])
-		landmark_point_3D.append([landmark_x, landmark_y, landmark_z])
-
-	return landmark_point, landmark_point_3D
-
-# Normalize landmark to fit model
 def pre_process_landmark(landmark_list):
-	temp_landmark_list = copy.deepcopy(landmark_list)
+    if not landmark_list:
+        return [0.0] * 42
+    base_x, base_y = landmark_list[0]
+    temp_landmark_list = [(x - base_x, y - base_y) for x, y in landmark_list]
+    flattened_list = list(itertools.chain.from_iterable(temp_landmark_list))
+    max_value = max(map(abs, flattened_list)) or 1
+    return [n / max_value for n in flattened_list]
 
-	# Convert to relative coordinates
-	base_x, base_y = 0, 0
-	for index, landmark_point in enumerate(temp_landmark_list):
-		if index == 0:
-			base_x, base_y = landmark_point[0], landmark_point[1]
+def get_wrapped_text_height(text, max_width, font, font_scale, thickness, line_height):
+    words = text.split(' ')
+    if not words or text.strip() == "":
+        return 0
+    current_line_width = 0
+    num_lines = 1
+    for word in words:
+        word_width, _ = cv.getTextSize(word + " ", font, font_scale, thickness)[0]
+        if current_line_width + word_width > max_width and current_line_width != 0:
+            num_lines += 1
+            current_line_width = word_width
+        else:
+            current_line_width += word_width
+    return num_lines * line_height
 
-		temp_landmark_list[index][0] = temp_landmark_list[index][0] - base_x
-		temp_landmark_list[index][1] = temp_landmark_list[index][1] - base_y
-
-	# Convert to a one-dimensional list
-	temp_landmark_list = list(
-		itertools.chain.from_iterable(temp_landmark_list))
-
-	# Normalization
-	max_value = max(list(map(abs, temp_landmark_list)))
-
-	def normalize_(n):
-		return n / max_value
-
-	temp_landmark_list = list(map(normalize_, temp_landmark_list))
-
-	return temp_landmark_list
-
-#  Normalize landmark sequences to fit model
-def pre_process_hand_movement(image, m_sequence):
-	width, height = image.shape[1], image.shape[0]
-	copy_of_m_sequence = copy.deepcopy(m_sequence) #(SEQ, 21, 2)
-	
-	landmarks_seq = [] #(SEQ, 21*2)
-	
-	# Save first corrdinates for replacing start sequence landmarks position
-	first_seq_landmarks = copy.deepcopy(copy_of_m_sequence[0])
-	# print(first_seq_landmarks)
-
-	for seq in range(0, SEQUENCE_FRAME_NUM):
-		landmarks_seq.append(list(np.array(copy_of_m_sequence[seq]).flatten()))
-
-	# Convert to relative coordinates
-	first_seq_landmarks_flatten = copy.deepcopy(landmarks_seq[0])
-	
-	for seq in range(0, SEQUENCE_FRAME_NUM):
-		for landmark in range(0, (21*2)):
-			if ((landmark % 2) == 0):
-				landmarks_seq[seq][landmark] = (landmarks_seq[seq][landmark] - first_seq_landmarks_flatten[landmark]) / width
-			else:
-				landmarks_seq[seq][landmark] = (landmarks_seq[seq][landmark] - first_seq_landmarks_flatten[landmark]) / height
-
-	# Replace first sequence with start sequence landmarks position
-	if(first_seq_landmarks[0][0] != 0 and first_seq_landmarks[0][1] != 0):
-		landmarks_seq[0] = pre_process_landmark(first_seq_landmarks)
-	
-	# Convert to a one-dimensional list #(SEQ*21*2,)
-	landmarks_seq = list(itertools.chain.from_iterable(landmarks_seq))
-
-	return landmarks_seq
+def draw_text_with_wrap(image, text, x_start, y_start, max_width, font, font_scale, color, thickness, line_height):
+    words = text.split(' ')
+    if not words or text.strip() == "":
+        return
+    current_line_text = ""
+    current_y = y_start
+    for word in words:
+        test_line_text = current_line_text + word + " "
+        test_line_width, _ = cv.getTextSize(test_line_text, font, font_scale, thickness)[0]
+        if test_line_width > max_width and current_line_text.strip() != "":
+            cv.putText(image, current_line_text.strip(), (x_start, current_y), font, font_scale, color, thickness, cv.LINE_AA)
+            current_y += line_height
+            current_line_text = word + " "
+        else:
+            current_line_text = test_line_text
+    if current_line_text.strip() != "":
+        cv.putText(image, current_line_text.strip(), (x_start, current_y), font, font_scale, color, thickness, cv.LINE_AA)
 
 def main():
+    global last_detected_sign, time_last_sign_changed, confirmed_sign_text, display_bar_text
 
-	# Argument parsing 
-	args = get_args()
+    args = get_args()
+    cap = cv.VideoCapture(args.device, cv.CAP_DSHOW)
+    cap.set(cv.CAP_PROP_FRAME_WIDTH, args.width)
+    cap.set(cv.CAP_PROP_FRAME_HEIGHT, args.height)
+    cap.set(cv.CAP_PROP_FPS, 30)
+    cap.set(cv.CAP_PROP_FOURCC, cv.VideoWriter_fourcc(*'MJPG'))
 
-	cap_device = args.device
-	cap_width = args.width
-	cap_height = args.height
+    mp_hands = mp.solutions.hands
+    hands = mp_hands.Hands(static_image_mode=args.use_static_image_mode,
+                           max_num_hands=MAX_NUM_HANDS,
+                           min_detection_confidence=args.min_detection_confidence,
+                           min_tracking_confidence=args.min_tracking_confidence)
+    mp_drawing = mp.solutions.drawing_utils
 
-	use_static_image_mode = args.use_static_image_mode
-	min_detection_confidence = args.min_detection_confidence
-	min_tracking_confidence = args.min_tracking_confidence
+    try:
+        shutil.copy2(TRAINER_STATIC_MODEL_PATH, STATIC_MODEL_PATH)
+        print(f"Copied static model from {TRAINER_STATIC_MODEL_PATH} to {STATIC_MODEL_PATH}")
+    except FileNotFoundError:
+        print(f"Warning: Static model not found at {TRAINER_STATIC_MODEL_PATH}.")
+    except Exception as e:
+        print(f"An error occurred while copying static model: {e}")
 
-	# OpenCV Camera preparation 
-	cap = cv.VideoCapture(cap_device, cv.CAP_DSHOW)
-	cap.set(cv.CAP_PROP_FRAME_WIDTH, cap_width)
-	cap.set(cv.CAP_PROP_FRAME_HEIGHT, cap_height)
-	cap.set(cv.CAP_PROP_FPS, 30)
-	cap.set(cv.CAP_PROP_FOURCC, cv.VideoWriter_fourcc(*'MJPG'))
+    sign_classifier = Classifier(model_path=STATIC_MODEL_PATH)
 
-	# Mediapipe Model load 
-	mp_hands = mp.solutions.hands
-	hands = mp_hands.Hands(
-		static_image_mode=use_static_image_mode,
-		max_num_hands=MAX_NUM_HANDS,
-		min_detection_confidence=min_detection_confidence,
-		min_tracking_confidence=min_tracking_confidence,
-	)
+    try:
+        with open(LABEL_PATH, encoding='utf-8-sig') as f:
+            classifier_labels = [row[0] for row in csv.reader(f)]
+        print(f"Loaded {len(classifier_labels)} labels from {LABEL_PATH}")
+    except FileNotFoundError:
+        print(f"Error: Label file not found at {LABEL_PATH}.")
+        return
 
-	# Mediapipe landmarks drawing tool load
-	mp_drawing = mp.solutions.drawing_utils
+    time_last_sign_changed = time.time()
 
-	# Init Classifiers
-	try:
-		shutil.copy2(TRAINER_STATIC_MODEL_PATH, STATIC_MODEL_PATH)
-		shutil.copy2(TRAINER_MOVEMENT_MODEL_PATH, MOVEMENT_MODEL_PATH)
-	except:
-		pass
-	sign_classifier = Classifier(model_path=STATIC_MODEL_PATH)
-	movement_sign_classifier = Classifier(model_path=MOVEMENT_MODEL_PATH)
+    while True:
+        key = cv.waitKey(10)
+        if key == 27:
+            break
+        elif key == ord('c'):
+            display_bar_text = ""
+            last_detected_sign = ""
+            time_last_sign_changed = time.time()
+            confirmed_sign_text = ""
+        elif key == ord('\b'):
+            if display_bar_text:
+                display_bar_text = ' '.join(display_bar_text.split()[:-1]) + " "
+                last_detected_sign = ""
+                time_last_sign_changed = time.time()
+                confirmed_sign_text = ""
 
-	# Read labels 
-	with open(LABEL_PATH,encoding='utf-8-sig') as f:
-		classifier_labels = csv.reader(f)
-		classifier_labels = [
-			row[0] for row in classifier_labels
-		]
-	
-	# TODO: Movement Labels
-	# with open(MOVEMENT_LABEL_PATH,encoding='utf-8-sig') as f:
-	# 	movement_classifier_labels = csv.reader(f)
-	# 	movement_classifier_labels = [
-	# 		row[0] for row in movement_classifier_labels
-	# ]
+        ret, image = cap.read()
+        if not ret:
+            print("Failed to grab frame. Exiting...")
+            break
+        image = cv.flip(image, 1)
+        debug_image = copy.deepcopy(image)
 
-	while True:
+        image = cv.cvtColor(image, cv.COLOR_BGR2RGB)
+        image.flags.writeable = False
+        results = hands.process(image)
+        image.flags.writeable = True
 
-		# Process Key (ESC: end) 
-		key = cv.waitKey(10)
-		if key == 27:  # ESC
-			break
+        current_time = time.time()
 
-		# Camera capture
-		ret, image = cap.read()
-		if not ret:
-			break
-		image = cv.flip(image, 1)  # Mirror display
+        if results.multi_hand_landmarks is not None:
+            hand_landmarks = results.multi_hand_landmarks[0]
+            handedness = results.multi_handedness[0]
 
-		# Copy feed to prevent detection corrupting image 
-		debug_image = copy.deepcopy(image)
-		debug_image = cv.resize(debug_image, (cap_width * 2, cap_height * 2))
+            landmark_list = calc_landmark_list(debug_image, hand_landmarks)
+            play_hand = handedness.classification[0].label
 
-		# Detection implementation 
-		image = cv.cvtColor(image, cv.COLOR_BGR2RGB)
-		results = hands.process(image)
-		
-		# Detected
-		if results.multi_hand_landmarks is not None:
-			for hand_landmarks, handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
-				
-				# Landmark calculation
-				landmark_list, landmark_list_3D = calc_landmark_list(debug_image, hand_landmarks)
-				MOVEMENT_HISTORY.append(landmark_list)
+            processed_landmark_list_for_classifier = landmark_list
+            if play_hand == 'Left':
+                processed_landmark_list_for_classifier = [[image.shape[1] - x, y] for x, y in landmark_list]
 
-				# Handedness Detection
-				play_hand = handedness.classification[0].label[0:]
+            pre_processed_landmark_list = pre_process_landmark(processed_landmark_list_for_classifier)
+            N_hand_sign_id, N_hand_sign_probs = sign_classifier(pre_processed_landmark_list, OUTPUT_COUNT)
 
-				# Preprocess Coordinates
-				pre_processed_landmark_list = pre_process_landmark(landmark_list)
-				pre_processed_movement_list = pre_process_hand_movement(debug_image, MOVEMENT_HISTORY)
-				# print(np.shape(pre_processed_movement_list)) (SEQ*(21*2),)
+            mp_drawing.draw_landmarks(debug_image, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+            debug_image = draw_bounding_rect(debug_image, calc_bounding_rect(debug_image, hand_landmarks))
 
-				# Hand sign classification from Classifiers
-				N_hand_sign_id, N_hand_sign_probs = sign_classifier(pre_processed_landmark_list, OUTPUT_COUNT)
-				N_move_sign_id, N_move_sign_probs = movement_sign_classifier(pre_processed_movement_list, OUTPUT_COUNT)
-				# Key-value replacement
-				N_move_sign_id = list(MOVEMENT_DICT[move_sign_id] for move_sign_id in N_move_sign_id)
+            current_detected_sign_label = ""
+            current_detected_sign_confidence = 0.0
 
-				# Landmarks visulaization
-				mp_drawing.draw_landmarks(debug_image, hand_landmarks, mp_hands.HAND_CONNECTIONS)
-				debug_image = draw_bounding_rect(debug_image, calc_bounding_rect(debug_image, hand_landmarks))
+            for N_detected_elements in zip(N_hand_sign_id, N_hand_sign_probs):
+                display_prob = "{:.2f}%".format(N_detected_elements[1] * 100)
+                if N_detected_elements[1] > DETECTION_THRESHOLD:
+                    current_detected_sign_label = classifier_labels[N_detected_elements[0]]
+                    current_detected_sign_confidence = N_detected_elements[1]
+                    cv.putText(debug_image, f"{current_detected_sign_label} : {display_prob}",
+                               (20, 80), FONT, FONT_SCALE, (0, 0, 0), FONT_THICKNESS, cv.LINE_AA)
 
-				# Output results
-				additional_display_height = 0
-				additional_display_width = 0
-				
-				if(play_hand == 'Right'):
-					additional_display_width = cap_width*2 - 300
-				
-				# Data list for sign and score
-				static_tuple_list = list(zip(N_hand_sign_id, N_hand_sign_probs))
-				movement_tuple_list = list(zip(N_move_sign_id, N_move_sign_probs))
+            if current_detected_sign_label and current_detected_sign_confidence > DETECTION_THRESHOLD:
+                if current_detected_sign_label != last_detected_sign:
+                    last_detected_sign = current_detected_sign_label
+                    time_last_sign_changed = current_time
+                    confirmed_sign_text = ""
+                else:
+                    time_held = current_time - time_last_sign_changed
+                    if time_held >= CONFIRMATION_HOLD_TIME:
+                        if confirmed_sign_text != last_detected_sign:
+                            confirmed_sign_text = last_detected_sign
+                            display_bar_text += confirmed_sign_text + " "
+                            last_detected_sign = ""
+                            time_last_sign_changed = current_time
 
-				# Default static list
-				display_list = static_tuple_list
+            else:
+                last_detected_sign = ""
+                time_last_sign_changed = current_time
+                confirmed_sign_text = ""
 
-				# Movement list replacement if there's a motion sign detected
-				if(movement_tuple_list[0][0] != -1):
-					display_list = movement_tuple_list
-				
-				# Display output on screen
-				for N_detected_elements in display_list:
-					
-					additional_display_height += 40
+        else:
+            cv.putText(debug_image, "No Hand Detected", (20, 40), FONT, FONT_SCALE, (0, 0, 255), FONT_THICKNESS, cv.LINE_AA)
+            last_detected_sign = ""
+            time_last_sign_changed = current_time
+            confirmed_sign_text = ""
 
-					display_prob = "{:.2f}%".format(N_detected_elements[1] * 100)
+        wrapped_text_display_width = args.width - 2 * TEXT_BAR_X_PADDING
+        total_text_height_needed = get_wrapped_text_height(display_bar_text, wrapped_text_display_width, FONT, FONT_SCALE, FONT_THICKNESS, TEXT_BAR_LINE_HEIGHT)
+        actual_bar_height = max(TEXT_BAR_MIN_HEIGHT, total_text_height_needed + TEXT_BAR_Y_PADDING_TOP * 2)
+        bar_y_start = args.height - actual_bar_height
 
-					threshold = DETECTION_THRESHOLD
-					if N_detected_elements[1] > threshold:
-						cv.putText(debug_image, str(classifier_labels[N_detected_elements[0]]) + " : " + str(display_prob), 
-							   (20 + additional_display_width, 40 + additional_display_height), cv.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3, cv.LINE_AA)
+        cv.rectangle(debug_image, (0, bar_y_start), (args.width, args.height), BAR_BACKGROUND_COLOR, -1)
+        draw_text_with_wrap(debug_image, display_bar_text, TEXT_BAR_X_PADDING, bar_y_start + TEXT_BAR_Y_PADDING_TOP, wrapped_text_display_width, FONT, FONT_SCALE, FONT_COLOR, FONT_THICKNESS, TEXT_BAR_LINE_HEIGHT)
 
-				#print(play_hand)	 
+        cv.imshow('Hand Gesture Reader', debug_image)
 
-		# Not detected
-		else:
-			#print("NO HAND")
-			MOVEMENT_HISTORY.append([[0] * 2] * 21)
-
-
-		# Display
-		cv.imshow('Hand Gesture Reader', debug_image)
-
-	cap.release()
-	cv.destroyAllWindows()
+    cap.release()
+    cv.destroyAllWindows()
 
 if __name__ == '__main__':
-	main()
+    main()

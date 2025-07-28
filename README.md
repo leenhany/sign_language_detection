@@ -4,12 +4,12 @@
   - Real-time hand gesture recognition using webcam
   - Customizable gesture vocabulary via label files
   - Simple interface for data collection and model training
-  - Visual feedback of detected gestures
+  - detect (A->Z) and some common words like (Hi,how are,nice,meet...)
   - Text output of recognized signs
 
 ## Demo
-
-    ![Untitled video - Made with Clipchamp (1)](https://github.com/user-attachments/assets/ab6292b1-e133-4e63-b3c7-560c2b17b8df)
+  ### Final real_time output
+  ![Untitled video - Made with Clipchamp (2)](https://github.com/user-attachments/assets/80bc7164-0d44-40e3-84f4-b3c573915940)
 
 
 ## Installation:
@@ -21,8 +21,7 @@
     <li/>pip install tensorflow
 
   ### Dependencies:
-    ```bash![Untitled video - Made with Clipchamp](https://github.com/user-attachments/assets/365fe298-84b3-4dad-97cf-5135045b3072)
-
+    ```bash
     pip install opencv-python mediapipe numpy tensorflow
     ```
 
@@ -80,20 +79,18 @@
 ## Technical Details:
 ### Data Representation:
   - landmark_list: 21 (x,y) coordinates
-  - landmark_list_3D: 21 (x,y,z) coordinates
   - Coordinates normalized relative to wrist
+  - 42 input 
 
 ### Model Output:
   - N_hand_sign_id: Top N predicted indices
   - N_hand_sign_probs: Confidence scores
   - Minimum confidence: 10% (adjustable)
+### Model conversion
+  - convert model to tensorflow lite to be easy and fast in real_time
+  - to give it to the Flutter team to connect it to the applications
 
 ## References:
 - MediaPipe Hands: https://google.github.io/mediapipe/solutions/hands
 - TensorFlow Lite for on-device inference
 
-## License:
-Apache License 2.0
-
-## Acknowledgments:
-Developed to assist the deaf community through technology

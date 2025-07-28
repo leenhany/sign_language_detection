@@ -1,5 +1,5 @@
 # Hand Gesture Detection for Deaf Communication
----
+
 ## Features:
   - Real-time hand gesture recognition using webcam
   - Customizable gesture vocabulary via label files
@@ -9,6 +9,7 @@
 
 ## Demo
   ### Final real_time output
+  
   ![Untitled video - Made with Clipchamp (2)](https://github.com/user-attachments/assets/80bc7164-0d44-40e3-84f4-b3c573915940)
 
 
@@ -21,6 +22,7 @@
     <li/>pip install tensorflow
 
   ### Dependencies:
+  
     ```bash
     pip install opencv-python mediapipe numpy tensorflow
     ```
@@ -86,6 +88,7 @@
   - N_hand_sign_id: Top N predicted indices
   - N_hand_sign_probs: Confidence scores
   - Minimum confidence: 10% (adjustable)
+    
 ### Model conversion
   - convert model to tensorflow lite to be easy and fast in real_time
   - to give it to the Flutter team to connect it to the applications
@@ -93,4 +96,11 @@
 ## References:
 - MediaPipe Hands: https://google.github.io/mediapipe/solutions/hands
 - TensorFlow Lite for on-device inference
+
+  
+## 👩‍💻 Author
+
+**Leen Hany**  
+GitHub: [@leenhany](https://github.com/leenhany)  
+LinkedIn: [Leen Hany](https://www.linkedin.com/in/leen-hany-481850220/)
 
